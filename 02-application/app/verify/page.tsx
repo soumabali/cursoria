@@ -1,0 +1,3 @@
+import {Verify} from '@/components/actions';
+export const metadata={title:'Verify your email',robots:{index:false,follow:false},referrer:'no-referrer' as const};
+export default async function VerifyPage({searchParams}:{searchParams:Promise<{token?:string}>}){const {token=''}=await searchParams;return <section className="auth-wrap"><div className="form-card"><div className="eyebrow">ONE LAST STEP</div><h1>Let’s make it official.</h1><p>Confirm below to verify your email and sign in. The link can be used once and expires after 15 minutes.</p><Verify token={/^[0-9a-f]{64}$/.test(token)?token:''}/><p><a href="/signin">Need a new link?</a></p></div></section>}

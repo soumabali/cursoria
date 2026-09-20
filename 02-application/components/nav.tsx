@@ -1,0 +1,5 @@
+"use client";
+import Link from 'next/link';
+import {useState} from 'react';
+import {Menu,X,ArrowUpRight,MousePointer2} from 'lucide-react';
+export function Nav({signedIn,role}:{signedIn:boolean;role?:string}){const [open,setOpen]=useState(false);return <header className="header"><Link href="/" className="brand"><span className="brand-mark"><MousePointer2 size={23} fill="currentColor"/></span>cursor<span className="brand-light">studio</span><span className="brand-dot">®</span></Link><button className="menu-toggle" aria-label="Toggle navigation" aria-expanded={open} onClick={()=>setOpen(!open)}>{open?<X/>:<Menu/>}</button><nav className={open?'nav open':'nav'}><Link href="/#collection">Explore cursors</Link><Link href="/guide">How it works</Link><Link href="/dashboard">My Library</Link>{['creator','superadmin'].includes(role||'')&&<Link href="/admin">Creator studio</Link>}<a className="nav-signin" href={signedIn?'/dashboard':'/signin'}>{signedIn?'My account':'Sign in'}<ArrowUpRight size={17}/></a></nav></header>}

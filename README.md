@@ -1,52 +1,17 @@
----
-name: cursoria
-status: draft
-type: monorepo
-server: 43.156.128.55
-ports: []
-urls: []
-repository: https://github.com/dhar/cursoria
-created: 2026-09-20
-tags: []
----
+# Cursoria
 
-# cursoria
+> Storefront untuk custom cursor packs.
 
-> Status: `draft` | Tipe: `monorepo` | Dibuat: 2026-09-20
+Live: https://cursoria.nexigo.my.id
 
-## Ringkasan
+## Stack
 
-Deskripsi singkat project ini: tujuan, ruang lingkup, dan target pengguna.
-
-## Arsitektur
-
-- **Platform:** web / desktop / mobile / backend / monorepo
-- **Tech stack:** (isi setelah diputuskan)
-- **Deployment target:** 43.156.128.55
-
-## Entry Points
-
-| Komponen | Path | Catatan |
-|----------|------|---------|
-| Web app | `02-application/packages/web/` | |
-| Desktop app | `02-application/packages/desktop/` | |
-| API/backend | `02-application/packages/api/` | |
-| Tests | `02-application/tests/` | |
-| Deploy scripts | `02-application/deploy/` | |
-
-## Quick Commands
-
-```bash
-# Dev server
-make dev
-
-# Run tests
-make test
-
-# Deploy
-make deploy
-```
-
-## Catatan
-
-Lihat folder `00-meta/` untuk mapping port, URL, dan credential.
+| Layer | Teknologi |
+|-------|-----------|
+| Framework | Next.js 16.2.6 (App Router, RSC) + React 19 |
+| Bahasa | TypeScript 5.9 |
+| Build → Worker | vinext 0.0.50 + @cloudflare/vite-plugin |
+| Database | Neon PostgreSQL via HTTPS SQL endpoint |
+| File storage | S3-compatible (Cloudflare R2) |
+| Payments | Midtrans Snap |
+| Email | Resend (magic link) |
