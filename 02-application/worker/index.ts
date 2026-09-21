@@ -40,16 +40,20 @@ interface ExecutionContext {
  * 'strict-dynamic' (which propagates trust to scripts the bootstrap
  * loads).
  *
- * `style-src` deliberately keeps 'unsafe-inline': this app uses inline
- * `style=` attributes, and a nonce cannot authorise style attributes -
- * only <style> elements. Removing it means migrating inline styles to
- * classes, which is separate work rather than an oversight.
+ * `style-src` also drops 'unsafe-inline', which means inline style
+ * ATTRIBUTES are blocked too (style-src-attr). Any `style="..."` on an
+ * element is silently discarded - the attribute stays in the DOM but the
+ * declaration never applies, so the element falls back to CSS. That is why
+ * the chart bar height is a generated `bar-N` class rather than an inline
+ * height, and why every element-level style was migrated to globals.css.
+ * Note style-element nonces are unrelated: a nonce can authorise <style>
+ * but never a style attribute.
  */
 const CSP_TEMPLATE = (nonce: string) =>
   [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-    "style-src 'self' 'unsafe-inline'",
+    "style-src 'self'",
     "img-src 'self' data:",
     "font-src 'self' data:",
     "connect-src 'self'",

@@ -12,9 +12,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored shadcn primitives, kept for reference but not imported by
+    // the app. Moved out of components/ui so the code that ships is not
+    // carrying dead files; linted separately from Site code.
+    "00-vendor/**",
   ]),
   {
-    files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
+    files: ["00-vendor/shadcn-unused/**/*.{ts,tsx}"],
     rules: {
       // These files are vendored verbatim from shadcn@4.17.0. Keep the
       // registry source intact while applying the stricter rules to Site code.
