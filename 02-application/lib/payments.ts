@@ -7,7 +7,7 @@ export async function reconcile(id:string,notification?:Record<string,unknown>){
  const [o]=await sql('SELECT * FROM orders WHERE id=$1',[id]);if(!o?.payment_key)throw new Error('Order not found.');
  const key=decrypt(o.payment_key);
  if(notification){const expected=createHash('sha512').update(String(notification.order_id)+String(notification.status_code)+String(notification.gross_amount)+key).digest('hex');if(!equal(expected,String(notification.signature_key||'')))throw new Error('Invalid payment signature.');}
- const r=await fetch(`${paymentHost(o.production)}/v2/${id}/status`,{headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},cache:'no-store'});
+ const r=await fetch(`${paymentHost(o.production)}/v2/${id}/status`,{headers:{Authorization:'Basic '+Buffer.from(key+':').toString('base64')},cache:'no-store',signal:AbortSignal.timeout(15000)});
  if(!r.ok)throw new Error('Payment status is not available yet.');const s=await r.json();
  if(s.order_id!==id||s.currency!=='IDR'||!Number.isFinite(Number(s.gross_amount))||Number(s.gross_amount)!==o.amount)throw new Error('Payment details do not match.');
  const state=s.transaction_status;let next='pending';

@@ -120,4 +120,76 @@ test('path traversal is rejected however it is spelled',()=>{
 test('a pack with no cursor files is rejected',()=>{
  assert.throws(()=>storage.validateZip(zip({'readme.txt':Buffer.from('nothing here')})),/needs cursor files/);
 });
+
+// A ZIP bomb: every member *declares* a tiny uncompressed size while its
+// deflate stream really expands to megabytes. The declared total stayed well
+// under the 100 MB cap and each declared member under the 12 MB cap, so the
+// size limits were satisfied by the lie and the archive inflated to hundreds
+// of megabytes before this guard existed. Declared sizes come from the file,
+// so they cannot bound anything on their own.
+function bombMembers(count,realSize,declared,extra={}){
+ const filler=Buffer.alloc(realSize,0x20); // spaces: passes the text checks
+ const deflated=deflateRawSync(filler);
+ const chunks=[],central=[];let offset=0;
+ // A real cursor member first, so the "needs cursor files" check cannot be
+ // what rejects the archive - the size guard must be doing the work.
+ for(const [name,content] of Object.entries({'cursor.cur':VALID_CUR,...extra})){
+  const nb=Buffer.from(name),defl=deflateRawSync(Buffer.from(content));
+  const lh=Buffer.alloc(30+nb.length);
+  lh.writeUInt32LE(0x04034b50,0);lh.writeUInt16LE(20,4);lh.writeUInt16LE(8,8);
+  lh.writeUInt32LE(defl.length,18);lh.writeUInt32LE(Buffer.from(content).length,22);
+  lh.writeUInt16LE(nb.length,26);nb.copy(lh,30);
+  chunks.push(lh,defl);
+  const cd=Buffer.alloc(46+nb.length);
+  cd.writeUInt32LE(0x02014b50,0);cd.writeUInt16LE(20,4);cd.writeUInt16LE(20,6);cd.writeUInt16LE(8,10);
+  cd.writeUInt32LE(defl.length,20);cd.writeUInt32LE(Buffer.from(content).length,24);
+  cd.writeUInt16LE(nb.length,28);cd.writeUInt32LE(offset,42);nb.copy(cd,46);
+  central.push(cd); offset+=lh.length+defl.length;
+ }
+ const total=count+Object.keys(extra).length+1;
+ for(let i=0;i<count;i++){
+  const nameBuf=Buffer.from('readme'+i+'.txt');
+  const local=Buffer.alloc(30+nameBuf.length);
+  local.writeUInt32LE(0x04034b50,0);local.writeUInt16LE(20,4);local.writeUInt16LE(8,8);
+  local.writeUInt32LE(deflated.length,18);local.writeUInt32LE(declared,22); // the lie
+  local.writeUInt16LE(nameBuf.length,26);nameBuf.copy(local,30);
+  chunks.push(local,deflated);
+  const cd=Buffer.alloc(46+nameBuf.length);
+  cd.writeUInt32LE(0x02014b50,0);cd.writeUInt16LE(20,4);cd.writeUInt16LE(20,6);cd.writeUInt16LE(8,10);
+  cd.writeUInt32LE(deflated.length,20);cd.writeUInt32LE(declared,24); // and again here
+  cd.writeUInt16LE(nameBuf.length,28);cd.writeUInt32LE(offset,42);nameBuf.copy(cd,46);
+  central.push(cd); offset+=local.length+deflated.length;
+ }
+ const cdBuf=Buffer.concat(central),body=Buffer.concat(chunks),eocd=Buffer.alloc(22);
+ eocd.writeUInt32LE(0x06054b50,0);eocd.writeUInt16LE(total,8);eocd.writeUInt16LE(total,10);
+ eocd.writeUInt32LE(cdBuf.length,12);eocd.writeUInt32LE(body.length,16);
+ return Buffer.concat([body,cdBuf,eocd]);
+}
+test('an archive that lies about uncompressed size is rejected without inflating it',()=>{
+ const archive=bombMembers(60,2*1024*1024,1024); // ~120 MB real, 60 KB declared
+ assert.ok(archive.length<1024*1024,`test archive should be small on the wire, got ${archive.length}`);
+ const started=Date.now();
+ assert.throws(()=>storage.validateZip(archive),/Invalid ZIP archive|unexpectedly large|under 100 MB/);
+ assert.ok(Date.now()-started<2000,`rejection should not inflate the whole archive (took ${Date.now()-started}ms)`);
+});
+test('unknown compression methods are rejected rather than passed through',()=>{
+ const entries={'cursor.cur':VALID_CUR};
+ const b=zip(entries);
+ // Rewrite both method fields from 8 (deflate) to 99 (unknown).
+ for(let i=0;i<b.length-4;i++){
+  if(b.readUInt32LE(i)===0x04034b50)b.writeUInt16LE(99,i+8);
+  if(b.readUInt32LE(i)===0x02014b50)b.writeUInt16LE(99,i+10);
+ }
+ assert.throws(()=>storage.validateZip(b),/Invalid ZIP archive/);
+});
+test('a readme may not contain markup, whatever the tag',()=>{
+ // Any '<' is refused, so this does not depend on knowing every dangerous
+ // tag. The previous version listed tags and was already behind.
+ for(const hostile of ['<math>x</math>','<details>','<video src=x>','<body>','<a href=x>','<img src=x>','</script>']){
+  assert.throws(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'readme.txt':Buffer.from(hostile)})),/markup or script/,`should reject ${hostile}`);
+ }
+ // A URL scheme in plain text is inert: nothing renders this file, and it
+ // contains no markup. Asserted so the boundary is deliberate, not accidental.
+ assert.doesNotThrow(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'readme.txt':Buffer.from('see javascript:alert(1) docs')})));
+});
 test.after(()=>{globalThis.fetch=originalFetch;delete globalThis.__cursorTest;});

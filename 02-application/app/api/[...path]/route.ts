@@ -31,16 +31,23 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  if(path==='auth/request'){
  const d=await body(req),email=z.string().trim().email().max(254).parse(d.email).toLowerCase();
  if(!process.env.EMAIL_API_KEY||!process.env.EMAIL_FROM)throw new Error('Email sign-in is not available yet.');
- await limit('email:'+email,3);await limit('email-global',100);
+ // Per-address, then per-IP, then a global ceiling. Without the IP key a
+ // single caller could mail-bomb many distinct addresses until the global
+ // bucket drained, which also locks out legitimate sign-ins for everyone.
+ await limit('email:'+email,3);
+ await limit('ip:'+(req.headers.get('cf-connecting-ip')||req.headers.get('x-forwarded-for')||'unknown'),20);
+ await limit('email-global',100);
  // A deleted account must not be re-creatable by simply signing in again:
  // deletion scrubs the address from users, so the sign-in upsert would
  // otherwise find no matching row and insert a fresh active account,
- // silently undoing the deletion. Refuse the address instead.
+ // silently undoing the deletion. Refuse the address instead - but answer
+ // the same way as a normal request, because a distinct message here would
+ // tell any caller which addresses once had an account on this store.
  const [gone]=await sql('SELECT 1 FROM deleted_identities WHERE email_hash=$1',[hash(email)]);
- if(gone)throw new Error('This email address was used for an account that has been deleted. It cannot be used to sign in again.');
+ if(gone)return reply({message:'Check your inbox for a sign-in link.'});
  const raw=token(),returnPath=typeof d.next==='string'&&/^\/products\/[a-z0-9-]+$/.test(d.next)?d.next:'/dashboard';await sql(`INSERT INTO login_tokens(hash,email,expires_at,return_path) VALUES($1,$2,now()+interval '15 minutes',$3)`,[hash(raw),email,returnPath]);
  const link=origin()+'/verify?token='+raw;
- const sent=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+process.env.EMAIL_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({from:process.env.EMAIL_FROM,to:email,subject:'Your Cursor Studio sign-in link',text:'Verify your email and sign in to Cursor Studio. This link expires in 15 minutes. Open it and confirm: '+link+'\nIf you did not request this, ignore this email.'})});
+ const sent=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(15000),headers:{Authorization:'Bearer '+process.env.EMAIL_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({from:process.env.EMAIL_FROM,to:email,subject:'Your Cursor Studio sign-in link',text:'Verify your email and sign in to Cursor Studio. This link expires in 15 minutes. Open it and confirm: '+link+'\nIf you did not request this, ignore this email.'})});
  if(!sent.ok){await sql('DELETE FROM login_tokens WHERE hash=$1',[hash(raw)]);throw new Error('We could not send your sign-in email. Please try again later.');}
  return reply({message:'Check your inbox. Your verification link expires in 15 minutes.'});
  }
@@ -71,7 +78,12 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  return reply({redirect:'/',message:'Your account has been deleted.'});
  }
  if(path==='views'){
- const d=await body(req),id=uuid.parse(d.id);let visitor=(await cookies()).get('cursor_visitor')?.value;if(!visitor||!/^[0-9a-f]{64}$/.test(visitor)){visitor=token();(await cookies()).set('cursor_visitor',visitor,{httpOnly:true,secure:origin().startsWith('https:'),sameSite:'lax',maxAge:2592000,path:'/'});}
+ const d=await body(req),id=uuid.parse(d.id);
+ // Unauthenticated and previously unlimited, so it was free view inflation:
+ // the visitor cookie is only validated by shape, so a caller can mint a new
+ // hex value per request instead of earning a cookie.
+ await limit('views:'+(req.headers.get('cf-connecting-ip')||'unknown'),60);
+ let visitor=(await cookies()).get('cursor_visitor')?.value;if(!visitor||!/^[0-9a-f]{64}$/.test(visitor)){visitor=token();(await cookies()).set('cursor_visitor',visitor,{httpOnly:true,secure:origin().startsWith('https:'),sameSite:'lax',maxAge:2592000,path:'/'});}
  await sql(`INSERT INTO product_views(product_id,visitor_hash) SELECT id,$2 FROM products WHERE id=$1 AND published ON CONFLICT DO NOTHING`,[id,hash(visitor)]);return reply({ok:true});
  }
  const u=await requireUser();await limit('actions:'+u.id,300);
@@ -87,11 +99,7 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  const [o]=await sql(`INSERT INTO orders(user_id,product_id,creator_id,amount,request_key,payment_key,production) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,request_key) DO UPDATE SET request_key=EXCLUDED.request_key RETURNING *`,[u.id,id,p.owner_id,amount,requestKey,settings.server_key,settings.production]);
  if(o.product_id!==id||o.amount!==amount)throw new Error('Checkout changed. Reload this page and try again.');
  if(o.checkout_url)return reply({redirect:o.checkout_url});
- const host=o.production?'https://app.midtrans.com':'https://app.sandbox.midtrans.com';
- const snap=await fetch(host+'/snap/v1/transactions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Basic '+Buffer.from(decrypt(o.payment_key)+':').toString('base64')},body:JSON.stringify({transaction_details:{order_id:o.id,gross_amount:o.amount},item_details:[{id:p.id,price:o.amount,quantity:1,name:p.title.slice(0,50)}],customer_details:{email:u.email},callbacks:{finish:origin()+'/dashboard?payment=return'},expiry:{unit:'hours',duration:24}})});
- if(!snap.ok)throw new Error('Checkout could not be opened. Check your order in My Library before trying again.');const result=await snap.json();
- if(typeof result.redirect_url!=='string'||!result.redirect_url.startsWith(host+'/'))throw new Error('Unexpected payment response.');
- await sql('UPDATE orders SET checkout_url=$2 WHERE id=$1',[o.id,result.redirect_url]);return reply({redirect:result.redirect_url});
+ return reply({redirect:await openCheckout({...o,title:p.title,email:u.email})});
  }
  if(path==='orders/refresh'){
  const d=await body(req),id=uuid.parse(d.id);
