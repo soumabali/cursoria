@@ -19,6 +19,12 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  const d=await body(req),email=z.string().trim().email().max(254).parse(d.email).toLowerCase();
  if(!process.env.EMAIL_API_KEY||!process.env.EMAIL_FROM)throw new Error('Email sign-in is not available yet.');
  await limit('email:'+email,3);await limit('email-global',100);
+ // A deleted account must not be re-creatable by simply signing in again:
+ // deletion scrubs the address from users, so the sign-in upsert would
+ // otherwise find no matching row and insert a fresh active account,
+ // silently undoing the deletion. Refuse the address instead.
+ const [gone]=await sql('SELECT 1 FROM deleted_identities WHERE email_hash=$1',[hash(email)]);
+ if(gone)throw new Error('This email address was used for an account that has been deleted. It cannot be used to sign in again.');
  const raw=token(),returnPath=typeof d.next==='string'&&/^\/products\/[a-z0-9-]+$/.test(d.next)?d.next:'/dashboard';await sql(`INSERT INTO login_tokens(hash,email,expires_at,return_path) VALUES($1,$2,now()+interval '15 minutes',$3)`,[hash(raw),email,returnPath]);
  const link=origin()+'/verify?token='+raw;
  const sent=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+process.env.EMAIL_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({from:process.env.EMAIL_FROM,to:email,subject:'Your Cursor Studio sign-in link',text:'Verify your email and sign in to Cursor Studio. This link expires in 15 minutes. Open it and confirm: '+link+'\nIf you did not request this, ignore this email.'})});
@@ -27,11 +33,30 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  }
  if(path==='auth/verify'){
  const d=await body(req),raw=z.string().regex(/^[0-9a-f]{64}$/).parse(d.token),session=token();
+ // A link issued before a deletion could still be clicked afterwards, so
+ // re-check here too rather than trusting that auth/request blocked it.
+ const [pending]=await sql('SELECT lower(email) AS email FROM login_tokens WHERE hash=$1',[hash(raw)]);
+ if(pending&&(await sql('SELECT 1 FROM deleted_identities WHERE email_hash=$1',[hash(pending.email)]))[0]){await sql('DELETE FROM login_tokens WHERE hash=$1',[hash(raw)]);throw new Error('This account has been deleted and cannot be signed in to.');}
  const [r]=await sql(`WITH consumed AS (DELETE FROM login_tokens WHERE hash=$1 AND expires_at>now() RETURNING email,return_path), account AS (INSERT INTO users(email,verified_at,role) SELECT email,now(),CASE WHEN email=$3 THEN 'superadmin' ELSE 'user' END FROM consumed ON CONFLICT(email) DO UPDATE SET verified_at=COALESCE(users.verified_at,now()) WHERE NOT users.disabled RETURNING id), logged AS (INSERT INTO sessions(hash,user_id,expires_at) SELECT $2,id,now()+interval '7 days' FROM account RETURNING user_id) SELECT user_id,consumed.return_path FROM logged CROSS JOIN consumed`,[hash(raw),hash(session),(process.env.SUPERADMIN_EMAIL||'').toLowerCase()]);
  if(!r)throw new Error('This link is invalid or expired. Please request a new one.');
  (await cookies()).set('cursor_session',session,{httpOnly:true,secure:origin().startsWith('https:'),sameSite:'lax',path:'/',maxAge:604800});return reply({redirect:r.return_path});
  }
  if(path==='auth/logout'){const s=(await cookies()).get('cursor_session')?.value;if(s)await sql('DELETE FROM sessions WHERE hash=$1',[hash(s)]);(await cookies()).delete('cursor_session');return reply({redirect:'/'});}
+ if(path==='account/delete'){
+ // Self-service account deletion. Anonymises the user row instead of
+ // removing it, because orders must be retained as financial records.
+ // Personal fields (email, name) are scrubbed, sessions and login
+ // tokens are revoked, and access to purchased packs stops. The order
+ // keeps a non-identifying placeholder email so accounting still works.
+ const u=await requireUser();const d=await body(req);
+ const confirmed=z.string().trim().toLowerCase().parse(d.confirm);
+ if(confirmed!==u.email.toLowerCase())throw new Error('Type your email address to confirm deletion.');
+ const tombstone='deleted+'+hash(u.id).slice(0,16)+'@invalid';
+ await sql(`WITH blocked AS (INSERT INTO deleted_identities(email_hash) VALUES($4) ON CONFLICT(email_hash) DO NOTHING), scrubbed AS (UPDATE users SET email=$2,name='',disabled=true,deleted_at=now() WHERE id=$1 RETURNING id), revoked AS (DELETE FROM sessions WHERE user_id=$1 RETURNING user_id), revoked_tokens AS (DELETE FROM login_tokens WHERE lower(email)=$3 RETURNING email), dropped AS (UPDATE entitlements SET active=false WHERE user_id=$1 RETURNING user_id) SELECT id FROM scrubbed`,[u.id,tombstone,u.email.toLowerCase(),hash(u.email.toLowerCase())]);
+ (await cookies()).delete('cursor_session');
+ await sql('INSERT INTO audit_log(actor_id,action,target) VALUES($1,$2,$3)',[u.id,'account.delete',tombstone]);
+ return reply({redirect:'/',message:'Your account has been deleted.'});
+ }
  if(path==='views'){
  const d=await body(req),id=uuid.parse(d.id);let visitor=(await cookies()).get('cursor_visitor')?.value;if(!visitor||!/^[0-9a-f]{64}$/.test(visitor)){visitor=token();(await cookies()).set('cursor_visitor',visitor,{httpOnly:true,secure:origin().startsWith('https:'),sameSite:'lax',maxAge:2592000,path:'/'});}
  await sql(`INSERT INTO product_views(product_id,visitor_hash) SELECT id,$2 FROM products WHERE id=$1 AND published ON CONFLICT DO NOTHING`,[id,hash(visitor)]);return reply({ok:true});
