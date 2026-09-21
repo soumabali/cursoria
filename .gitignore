@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+02-application/dist/
+02-application/.next/
+02-application/.vinext/
+02-application/build/
+
+# Wrangler / Cloudflare local state (contains dev-mode bindings)
+.wrangler/
+02-application/.wrangler/
+dev.vars
+.dev.vars
+*.dev.vars
+
+# Environment files. `.env.example` is intentionally NOT ignored: it
+# documents variable names with placeholder values and is safe to commit.
+.env
+.env.*
+!.env.example
+05-config/.env
+05-config/.env.*
+!05-config/.env.example
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test / coverage output
+coverage/
+.nyc_output/
+*.lcov
+
+# Local scratch
+*.tmp
+*.bak
+.*.swp
