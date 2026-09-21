@@ -26,8 +26,8 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       terms. Required before the store can go public.
 
 - [ ] **Real pack content** — the catalog needs actual cursor packs.
-      Currently only a verification pack ("Matcha Moments", free)
-      exists. See "Cleanup" below.
+      The store is now genuinely empty (0 products); the earlier
+      verification pack has been removed.
 
 - [ ] **Git remote + push** — the repo has no remote. GitHub auth is
       account `soumabali`; the token needs Contents: Read/Write.
@@ -47,8 +47,8 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       next.config.ts `headers()`). Now set in worker/index.ts.
 - [x] Nonce-based CSP: `script-src` no longer allows `unsafe-inline`;
       header nonce matches the HTML nonce per request. Zero violations.
-- [x] Remove verification test data from production. All 4 R2 objects
-      and their DB rows deleted; superadmin account and login kept.
+- [x] Remove verification test data from production. All R2 objects and
+      their DB rows deleted; superadmin account and login kept.
 - [ ] Migrate inline `style=` attributes to CSS classes so `style-src`
       can also drop 'unsafe-inline' (a nonce cannot authorise style
       attributes, only <style> elements)
@@ -56,24 +56,17 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
 - [ ] Malware scanning for uploaded ZIPs before a larger public launch
       (current check is file-type/path/size only, not antivirus)
 
-## Cleanup: verification artifacts in production
-
-Created while proving the storage chain (2026-09-21). Real rows, not
-seeded samples. There is no product-delete UI, so removal is SQL-only.
-
-| Artifact | Detail |
-|----------|--------|
-| product | slug `matcha-moments`, free, published |
-| uploads | 4 rows (2 preview, 2 package) under the owner account |
-| order | Rp0, status paid, free claim |
-| entitlement | active, owner account ↔ the test product |
-
-R2 objects: `cursoria-packs/<owner-id>/<hash>.{png,zip}` — 4 objects.
-Rows must go before the objects, and the entitlement/order before the
-product (foreign keys).
-
 ## Notes
 
+- **DB is Neon Postgres, not Cloudflare D1.** `lib/db.ts` talks to
+  Neon's HTTPS `/sql` endpoint using the `DATABASE_URL` secret. The
+  generated wrangler config has empty `d1_databases` and
+  `db/index.ts` (drizzle/d1) is vestigial. The D1-shaped Cloudflare
+  API token also cannot see the DB. Query it with the same POST body
+  the app sends (`/tmp/neonq.mjs` does this).
+- **Never delete the `users` row.** `sudhar.denpasar@gmail.com` is the
+  only account and the store owner; there is no other way back into
+  `/admin`.
 - `SUPERADMIN_EMAIL` must stay set until a non-superadmin account
   exists: the sign-in upsert uses it to bootstrap the superadmin role.
   Removing the secret before then would create the owner as `role='user'`
@@ -83,3 +76,6 @@ product (foreign keys).
   store.
 - Creator payouts are manual; analytics report gross revenue before
   gateway fees, not a withdrawable balance.
+- Sign-in links land on `/verify?token=...`, which renders a button
+  that must be clicked — it does not auto-submit. `/signin` ignores the
+  `token` param entirely.
