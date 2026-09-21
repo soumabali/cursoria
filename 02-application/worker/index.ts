@@ -26,22 +26,29 @@ interface ExecutionContext {
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 /**
- * Security headers.
+ * Security headers with a per-request CSP nonce.
  *
- * These live here rather than in next.config.ts because the deployed
- * Worker runs the vinext build, which does not apply Next.js `headers()`.
- * Setting them in next.config.ts alone leaves production without any of
- * them (verified: all five were absent from the live responses).
+ * These live here rather than next.config.ts because the deployed vinext
+ * build does not apply Next.js `headers()` - setting them there alone left
+ * production with none of them (verified: all five were absent live).
  *
- * `script-src` and `style-src` still allow 'unsafe-inline': React streams
- * inline bootstrap scripts and styles, so a nonce would have to be
- * threaded through every render. Removing unsafe-inline is a follow-up,
- * not something to fake here.
+ * How the nonce is applied: we put `'nonce-<value>'` on the CSP of the
+ * *incoming* request. vinext's renderer reads the nonce back out of the
+ * request headers and stamps the same value onto the bootstrap and font
+ * <script>/<style> tags it emits, so header and tags always agree. This
+ * lets us drop 'unsafe-inline' for scripts entirely, replaced with
+ * 'strict-dynamic' (which propagates trust to scripts the bootstrap
+ * loads).
+ *
+ * `style-src` deliberately keeps 'unsafe-inline': this app uses inline
+ * `style=` attributes, and a nonce cannot authorise style attributes -
+ * only <style> elements. Removing it means migrating inline styles to
+ * classes, which is separate work rather than an oversight.
  */
-const SECURITY_HEADERS: Record<string, string> = {
-  "Content-Security-Policy": [
+const CSP_TEMPLATE = (nonce: string) =>
+  [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self' data:",
@@ -50,20 +57,31 @@ const SECURITY_HEADERS: Record<string, string> = {
     "base-uri 'self'",
     "frame-ancestors 'self'",
     "form-action 'self'",
-  ].join("; "),
+  ].join("; ");
+
+/** Headers that do not depend on the nonce, so they are constant. */
+const STATIC_SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-Frame-Options": "SAMEORIGIN",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 };
 
-function withSecurityHeaders(response: Response): Response {
-  // Only guard real documents and responses we generate. Redirects and
-  // downloads keep their existing header set plus the same protections.
+function newNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/** Mirror the policy onto the response, preserving headers the app set. */
+function withSecurityHeaders(response: Response, nonce: string): Response {
   const headers = new Headers(response.headers);
-  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+  for (const [key, value] of Object.entries(STATIC_SECURITY_HEADERS)) {
     // Do not clobber a header the app already set deliberately.
     if (!headers.has(key)) headers.set(key, value);
+  }
+  if (!headers.has("Content-Security-Policy")) {
+    headers.set("Content-Security-Policy", CSP_TEMPLATE(nonce));
   }
   return new Response(response.body, {
     status: response.status,
@@ -75,21 +93,27 @@ function withSecurityHeaders(response: Response): Response {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const nonce = newNonce();
+
+    // Hand the renderer the nonce on the request it reads headers from.
+    const inbound = new Request(request, { headers: new Headers(request.headers) });
+    inbound.headers.set("Content-Security-Policy", CSP_TEMPLATE(nonce));
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return withSecurityHeaders(
-        await handleImageOptimization(request, {
+        await handleImageOptimization(inbound, {
           fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
           transformImage: async (body, { width, format, quality }) => {
             const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
             return result.response();
           },
-        }, allowedWidths)
+        }, allowedWidths),
+        nonce
       );
     }
 
-    return withSecurityHeaders(await handler.fetch(request, env, ctx));
+    return withSecurityHeaders(await handler.fetch(inbound, env, ctx), nonce);
   },
 };
 
