@@ -81,6 +81,20 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       rely on `maxOutputLength`, because the Workers `node:zlib` shim
       ignores it while Node honours it — the local suite passed 20/20
       while production was vulnerable.
+- [x] Receipt/order-confirmation email. The only outbound mail was the
+      sign-in link, so a buyer paid and received nothing. `lib/email.ts`
+      now owns all outbound mail. The send is claimed with a conditional
+      UPDATE before it happens — two reconciliations for one order would
+      otherwise both mail the buyer, and webhook retries make that
+      routine. Verified on production: claim produced receipt, repeat
+      claim produced none, unpaid order not claimable.
+- [x] Terms-acceptance record. The required "I agree" checkbox lived
+      entirely in the browser and was never sent, so the licence was
+      unprovable per customer. Now: `login_tokens.accepted` carries the
+      flag across the verify gap, `users.terms_accepted_at` records first
+      acceptance (COALESCE, so later sign-ins cannot rewrite it), and
+      `orders.policies_accepted_at` records it per purchase. Verified
+      live: accepted=true records, accepted=false does NOT.
 - [ ] A security bound verified only in the Node test runner is not
       verified. Anything depending on a platform API needs testing
       against the deployed runtime too.

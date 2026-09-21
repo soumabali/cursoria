@@ -9,6 +9,7 @@ const retention:[string,string,string][]=[
 ['Payment details (card, bank)','Never stored by this store','Handled entirely by Midtrans'],
 ['A one-way hash of your email','Not stored for active accounts','Kept, to block sign-in with a deleted address'],
 ['A deletion marker on the anonymised account row','—','Kept, so an account you closed yourself is distinguishable from one an operator disabled'],
+['When you accepted these policies, on your account and on each order','Kept while your account is active','The copy on an order is kept with that order; the account one is erased'],
 ];
 return <article className="content-page prose">
 <div className="eyebrow">CLEAR BEFORE YOU CLICK</div>
@@ -28,6 +29,9 @@ return <article className="content-page prose">
 
 <h2>Account and privacy</h2>
 <p>We store your email, verification status, sessions, orders, and download entitlements so we can operate your account and prove your purchases. Creators can see statistics and transactions for their own work. Superadmins can manage the store.</p>
+
+<h3>Accepting these policies</h3>
+<p>When you sign in you tick a box confirming you accept these policies, and we record the date and time you did so. A separate record is kept for each order, because a licence is granted for a specific pack at the moment you get it, and these policies may change between one purchase and the next. If you sign in without ticking the box, no acceptance is recorded — we would rather hold no evidence than claim you agreed when you did not. Registered accounts and orders created before this was recorded have no acceptance date, and we do not invent one.</p>
 
 <h3>What is kept, and for how long</h3>
 <div className="table-wrap"><table className="data-table">

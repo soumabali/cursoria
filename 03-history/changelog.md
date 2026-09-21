@@ -26,6 +26,22 @@
   (`CONTACT_EMAIL` placeholder), and the governing law.
 - Open-tasks audit recorded; state verified against live prod (0 products, 0 payment_settings, no S3_* secrets).
 
+### Added
+- Receipt / order-confirmation email. Previously the only outbound mail was
+  the sign-in link, so a buyer paid and heard nothing. All outbound mail now
+  goes through `lib/email.ts`. The send is claimed with a conditional UPDATE
+  before it happens, so a duplicate webhook cannot mail the buyer twice and a
+  failed send can be retried. Sent after the entitlement commits, never before.
+- Terms-acceptance record. The sign-in "I agree" checkbox was never sent to
+  the server, so the licence was unprovable per customer. `login_tokens
+  .accepted` carries the flag across the verify gap, `users.terms_accepted_at`
+  records first acceptance, and `orders.policies_accepted_at` records it per
+  purchase. Both timestamps are nullable and were NOT backfilled: NULL means
+  "no evidence", which is the truth for rows predating this.
+- `/policies` states that acceptance is recorded, and the retention table
+  lists the acceptance record.
+- Migration `database/004_terms_and_receipts.sql`.
+
 ### Fixed
 - **ZIP bomb: a 0.25 MB upload hung the Worker past 60 s and left the site
   intermittently unresponsive.** Declared-size limits were satisfied by the
