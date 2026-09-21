@@ -13,6 +13,14 @@
 - Open-tasks audit recorded; state verified against live prod (0 products, 0 payment_settings, no S3_* secrets).
 
 ### Fixed
+- Security headers were configured in next.config.ts but never reached
+  production (the vinext Worker build ignores Next.js `headers()`).
+  Now set in worker/index.ts; all five verified live.
+- WCAG AA contrast: 19 muted tones below 4.5:1 (the --muted token was
+  4.22 on paper, 3.98 on tinted strips). Darkened the muted family to
+  clear 4.5:1 on the darkest surface it sits on, keeping the palette.
+- Dashboard heading order skipped H1 -> H3; empty states now H2.
+- Decorative glyphs marked aria-hidden.
 - Lint debt cleared: 18 errors to 0 (anchor-vs-Link, explicit
   any). tsc clean; security tests 12/12; build passes.
 - Admin overview crashed for signed-in superadmins: the revenue chart

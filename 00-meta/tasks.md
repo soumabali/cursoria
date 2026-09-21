@@ -41,11 +41,14 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       download entitlement gate
 - [x] Cloudflare R2 bucket + S3_* secrets; upload → publish → claim →
       download verified end to end
+- [x] Accessibility: WCAG contrast (19 failing tones → 0), heading
+      order, decorative glyphs marked aria-hidden. Verified on prod.
+- [x] Security headers actually sent (they never were: vinext ignores
+      next.config.ts `headers()`). Now set in worker/index.ts.
 - [ ] Remove verification test data from production (see Cleanup)
-- [ ] Accessibility audit (W3C target-size applied; no conformance
-      audit performed)
-- [ ] Nonce-based CSP + independent security review (CSP currently
-      retains unsafe-inline for framework scripts/styles)
+- [ ] Nonce-based CSP to drop 'unsafe-inline' (React streams inline
+      bootstrap code, so this needs a nonce threaded through render)
+- [ ] Independent security review
 - [ ] Malware scanning for uploaded ZIPs before a larger public launch
       (current check is file-type/path/size only, not antivirus)
 
