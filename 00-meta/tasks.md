@@ -45,9 +45,13 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       order, decorative glyphs marked aria-hidden. Verified on prod.
 - [x] Security headers actually sent (they never were: vinext ignores
       next.config.ts `headers()`). Now set in worker/index.ts.
-- [ ] Remove verification test data from production (see Cleanup)
-- [ ] Nonce-based CSP to drop 'unsafe-inline' (React streams inline
-      bootstrap code, so this needs a nonce threaded through render)
+- [x] Nonce-based CSP: `script-src` no longer allows `unsafe-inline`;
+      header nonce matches the HTML nonce per request. Zero violations.
+- [x] Remove verification test data from production. All 4 R2 objects
+      and their DB rows deleted; superadmin account and login kept.
+- [ ] Migrate inline `style=` attributes to CSS classes so `style-src`
+      can also drop 'unsafe-inline' (a nonce cannot authorise style
+      attributes, only <style> elements)
 - [ ] Independent security review
 - [ ] Malware scanning for uploaded ZIPs before a larger public launch
       (current check is file-type/path/size only, not antivirus)

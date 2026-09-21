@@ -13,6 +13,12 @@
 - Open-tasks audit recorded; state verified against live prod (0 products, 0 payment_settings, no S3_* secrets).
 
 ### Fixed
+- Nonce-based CSP: `script-src` no longer allows 'unsafe-inline'. A
+  per-request nonce is set on the incoming request's CSP; vinext reads
+  it from the request headers and stamps it on its tags. Verified: header
+  and HTML nonce match per request, nonces rotate, 0 violations.
+- Removed the duplicate CSP in next.config.ts, which won on API routes
+  and published 'unsafe-inline' while the page enforced a nonce.
 - Security headers were configured in next.config.ts but never reached
   production (the vinext Worker build ignores Next.js `headers()`).
   Now set in worker/index.ts; all five verified live.
