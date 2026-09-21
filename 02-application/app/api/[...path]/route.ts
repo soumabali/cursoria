@@ -2,6 +2,7 @@ import {NextResponse} from 'next/server';
 import {cookies} from 'next/headers';
 import {z} from 'zod';
 import {sql,configured} from '@/lib/db';
+import {sendSignInLink,sendReceipt,emailConfigured} from '@/lib/email';
 import {body,readLimited,csrf,hash,token,requireUser,limit,origin,encrypt,decrypt,safeError} from '@/lib/security';
 import {objectRequest,validateZip} from '@/lib/storage';
 import {reconcile} from '@/lib/payments';
@@ -30,7 +31,7 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  csrf(req);
  if(path==='auth/request'){
  const d=await body(req),email=z.string().trim().email().max(254).parse(d.email).toLowerCase();
- if(!process.env.EMAIL_API_KEY||!process.env.EMAIL_FROM)throw new Error('Email sign-in is not available yet.');
+ if(!emailConfigured())throw new Error('Email sign-in is not available yet.');
  // Per-address, then per-IP, then a global ceiling. Without the IP key a
  // single caller could mail-bomb many distinct addresses until the global
  // bucket drained, which also locks out legitimate sign-ins for everyone.
@@ -45,10 +46,10 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  // tell any caller which addresses once had an account on this store.
  const [gone]=await sql('SELECT 1 FROM deleted_identities WHERE email_hash=$1',[hash(email)]);
  if(gone)return reply({message:'Check your inbox for a sign-in link.'});
- const raw=token(),returnPath=typeof d.next==='string'&&/^\/products\/[a-z0-9-]+$/.test(d.next)?d.next:'/dashboard';await sql(`INSERT INTO login_tokens(hash,email,expires_at,return_path) VALUES($1,$2,now()+interval '15 minutes',$3)`,[hash(raw),email,returnPath]);
+ const raw=token(),returnPath=typeof d.next==='string'&&/^\/products\/[a-z0-9-]+$/.test(d.next)?d.next:'/dashboard';await sql(`INSERT INTO login_tokens(hash,email,expires_at,return_path,accepted) VALUES($1,$2,now()+interval '15 minutes',$3,$4)`,[hash(raw),email,returnPath,d.accepted===true]);
  const link=origin()+'/verify?token='+raw;
- const sent=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(15000),headers:{Authorization:'Bearer '+process.env.EMAIL_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({from:process.env.EMAIL_FROM,to:email,subject:'Your Cursor Studio sign-in link',text:'Verify your email and sign in to Cursor Studio. This link expires in 15 minutes. Open it and confirm: '+link+'\nIf you did not request this, ignore this email.'})});
- if(!sent.ok){await sql('DELETE FROM login_tokens WHERE hash=$1',[hash(raw)]);throw new Error('We could not send your sign-in email. Please try again later.');}
+ const sent=await sendSignInLink(email,link);
+ if(!sent){await sql('DELETE FROM login_tokens WHERE hash=$1',[hash(raw)]);throw new Error('We could not send your sign-in email. Please try again later.');}
  return reply({message:'Check your inbox. Your verification link expires in 15 minutes.'});
  }
  if(path==='auth/verify'){
@@ -57,8 +58,18 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  // re-check here too rather than trusting that auth/request blocked it.
  const [pending]=await sql('SELECT lower(email) AS email FROM login_tokens WHERE hash=$1',[hash(raw)]);
  if(pending&&(await sql('SELECT 1 FROM deleted_identities WHERE email_hash=$1',[hash(pending.email)]))[0]){await sql('DELETE FROM login_tokens WHERE hash=$1',[hash(raw)]);throw new Error('This account has been deleted and cannot be signed in to.');}
- const [r]=await sql(`WITH consumed AS (DELETE FROM login_tokens WHERE hash=$1 AND expires_at>now() RETURNING email,return_path), account AS (INSERT INTO users(email,verified_at,role) SELECT email,now(),CASE WHEN email=$3 THEN 'superadmin' ELSE 'user' END FROM consumed ON CONFLICT(email) DO UPDATE SET verified_at=COALESCE(users.verified_at,now()) WHERE NOT users.disabled RETURNING id), logged AS (INSERT INTO sessions(hash,user_id,expires_at) SELECT $2,id,now()+interval '7 days' FROM account RETURNING user_id) SELECT user_id,consumed.return_path FROM logged CROSS JOIN consumed`,[hash(raw),hash(session),(process.env.SUPERADMIN_EMAIL||'').toLowerCase()]);
+ const [r]=await sql(`WITH consumed AS (DELETE FROM login_tokens WHERE hash=$1 AND expires_at>now() RETURNING email,return_path,accepted), account AS (INSERT INTO users(email,verified_at,role) SELECT email,now(),CASE WHEN email=$3 THEN 'superadmin' ELSE 'user' END FROM consumed ON CONFLICT(email) DO UPDATE SET verified_at=COALESCE(users.verified_at,now()) WHERE NOT users.disabled RETURNING id), logged AS (INSERT INTO sessions(hash,user_id,expires_at) SELECT $2,id,now()+interval '7 days' FROM account RETURNING user_id) SELECT user_id,consumed.return_path,consumed.accepted FROM logged CROSS JOIN consumed`,[hash(raw),hash(session),(process.env.SUPERADMIN_EMAIL||'').toLowerCase()]);
  if(!r)throw new Error('This link is invalid or expired. Please request a new one.');
+ // Record that the account holder accepted the store policies.
+ //
+ // The sign-in form has always had a required "I agree" checkbox, but the
+ // server never saw it, so the licence was unprovable per customer. The flag
+ // travels on the token row from auth/request rather than being re-sent by the
+ // verify call, because the acceptance happened when the form was submitted;
+ // re-asking at verify would let a client claim acceptance it never gave.
+ // Only the first acceptance is kept, so later sign-ins cannot rewrite when
+ // this account first agreed. Per-purchase acceptance lives on the order.
+ if(r.accepted===true)await sql('UPDATE users SET terms_accepted_at=COALESCE(terms_accepted_at,now()) WHERE id=$1',[r.user_id]);
  (await cookies()).set('cursor_session',session,{httpOnly:true,secure:origin().startsWith('https:'),sameSite:'lax',path:'/',maxAge:604800});return reply({redirect:r.return_path});
  }
  if(path==='auth/logout'){const s=(await cookies()).get('cursor_session')?.value;if(s)await sql('DELETE FROM sessions WHERE hash=$1',[hash(s)]);(await cookies()).delete('cursor_session');return reply({redirect:'/'});}
@@ -93,10 +104,17 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  const [p]=await sql('SELECT * FROM products WHERE id=$1 AND published',[id]);if(!p?.package_key)throw new Error('This product is not available.');
  let amount=p.price;if(p.mode==='donation')amount=z.number().int().min(p.price).max(100000000).parse(d.amount);
  if(p.mode==='free'){
- await sql(`WITH o AS (INSERT INTO orders(user_id,product_id,creator_id,amount,status,request_key) VALUES($1,$2,$3,0,'paid',$4) ON CONFLICT(user_id,request_key) DO UPDATE SET request_key=EXCLUDED.request_key WHERE orders.product_id=EXCLUDED.product_id RETURNING *) INSERT INTO entitlements(user_id,product_id,order_id) SELECT user_id,product_id,id FROM o ON CONFLICT(user_id,product_id) DO UPDATE SET active=true,order_id=EXCLUDED.order_id`,[u.id,id,p.owner_id,requestKey]);return reply({redirect:'/dashboard'});
+ // Acceptance is recorded on the order. The sign-in checkbox covers the
+ // account; this covers the licence for THIS pack, which is the thing a
+ // dispute is actually about, and terms can change between purchases.
+ const [free]=await sql(`WITH o AS (INSERT INTO orders(user_id,product_id,creator_id,amount,status,request_key,policies_accepted_at) VALUES($1,$2,$3,0,'paid',$4,now()) ON CONFLICT(user_id,request_key) DO UPDATE SET request_key=EXCLUDED.request_key WHERE orders.product_id=EXCLUDED.product_id RETURNING id) INSERT INTO entitlements(user_id,product_id,order_id) SELECT $1,$2,id FROM o ON CONFLICT(user_id,product_id) DO UPDATE SET active=true,order_id=EXCLUDED.order_id RETURNING order_id`,[u.id,id,p.owner_id,requestKey]);
+ // Free packs never reach reconcile, so this is the only place their
+ // confirmation email can originate.
+ if(free?.order_id)await sendReceipt(free.order_id);
+ return reply({redirect:'/dashboard'});
  }
  const [settings]=await sql('SELECT * FROM payment_settings WHERE id=1 AND enabled');if(!settings)throw new Error('Payments are not available yet. Please try again later.');
- const [o]=await sql(`INSERT INTO orders(user_id,product_id,creator_id,amount,request_key,payment_key,production) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,request_key) DO UPDATE SET request_key=EXCLUDED.request_key RETURNING *`,[u.id,id,p.owner_id,amount,requestKey,settings.server_key,settings.production]);
+ const [o]=await sql(`INSERT INTO orders(user_id,product_id,creator_id,amount,request_key,payment_key,production,policies_accepted_at) VALUES($1,$2,$3,$4,$5,$6,$7,now()) ON CONFLICT(user_id,request_key) DO UPDATE SET request_key=EXCLUDED.request_key RETURNING *`,[u.id,id,p.owner_id,amount,requestKey,settings.server_key,settings.production]);
  if(o.product_id!==id||o.amount!==amount)throw new Error('Checkout changed. Reload this page and try again.');
  if(o.checkout_url)return reply({redirect:o.checkout_url});
  return reply({redirect:await openCheckout({...o,title:p.title,email:u.email})});

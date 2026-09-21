@@ -2,6 +2,7 @@ import 'server-only';
 import {createHash} from 'node:crypto';
 import {sql} from './db';
 import {decrypt,equal} from './security';
+import {sendReceipt} from './email';
 export function paymentHost(production:boolean){return production?'https://api.midtrans.com':'https://api.sandbox.midtrans.com';}
 export async function reconcile(id:string,notification?:Record<string,unknown>){
  const [o]=await sql('SELECT * FROM orders WHERE id=$1',[id]);if(!o?.payment_key)throw new Error('Order not found.');
@@ -14,5 +15,11 @@ export async function reconcile(id:string,notification?:Record<string,unknown>){
  if(state==='refund')next='refunded';else if(state==='partial_refund')next='review';else if(['settlement','capture'].includes(state)&&(!s.fraud_status||s.fraud_status==='accept'))next='paid';else if(['deny','cancel','expire','failure'].includes(state))next='failed';
  const eventHash=createHash('sha256').update(JSON.stringify([id,state,s.fraud_status,s.refund_amount,s.transaction_id])).digest('hex');
  await sql(`WITH locked AS MATERIALIZED (SELECT * FROM orders WHERE id=$1 FOR UPDATE), changed AS (UPDATE orders o SET status=CASE WHEN l.status='refunded' THEN 'refunded' WHEN $2='refunded' THEN 'refunded' WHEN l.status='review' THEN 'review' WHEN $2='review' THEN 'review' WHEN l.status='paid' AND $2 IN ('pending','failed') THEN 'paid' ELSE $2 END,updated_at=now() FROM locked l WHERE o.id=l.id RETURNING o.*), logged AS (INSERT INTO payment_events(order_id,status,event_hash) VALUES($1,$2,$3) ON CONFLICT(event_hash) DO NOTHING), granted AS (INSERT INTO entitlements(user_id,product_id,order_id,active) SELECT user_id,product_id,id,true FROM changed WHERE status='paid' ON CONFLICT(user_id,product_id) DO UPDATE SET active=true,order_id=EXCLUDED.order_id WHERE NOT entitlements.active RETURNING user_id) UPDATE entitlements e SET active=false FROM changed c WHERE e.order_id=c.id AND c.status IN ('refunded','review')`,[id,next,eventHash]);
+ // Receipt after the grant has committed, never inside the statement above: if
+ // mail were sent first and the statement then failed, the buyer would hold a
+ // receipt for access they do not have. sendReceipt swallows its own failures
+ // and claims the order row atomically, so a duplicate notification cannot
+ // send twice and a mail outage cannot fail the webhook.
+ if(next==='paid')await sendReceipt(id);
  return {status:next};
 }

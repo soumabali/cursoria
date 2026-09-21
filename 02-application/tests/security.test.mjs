@@ -28,9 +28,17 @@ const securityURL=compiled('lib/security.ts',{
 const security=await import(securityURL);
 const storageURL=compiled('lib/storage.ts');
 const storage=await import(storageURL);
-const paymentURL=compiled('lib/payments.ts',{
+const emailURL=compiled('lib/email.ts',{
  "import {sql} from './db';":dbReplacement,
  "from './security'":`from '${securityURL}'`
+});
+const email=await import(emailURL);
+const paymentURL=compiled('lib/payments.ts',{
+ "import {sql} from './db';":dbReplacement,
+ "from './security'":`from '${securityURL}'`,
+ // Payments sends the receipt, so it must resolve to the same real module the
+ // receipt tests exercise rather than a stub that could drift from it.
+ "from './email'":`from '${emailURL}'`
 });
 const payments=await import(paymentURL);
 const routeURL=compiled('app/api/[...path]/route.ts',{
@@ -38,6 +46,7 @@ const routeURL=compiled('app/api/[...path]/route.ts',{
  "from '@/lib/security'":`from '${securityURL}'`,
  "from '@/lib/storage'":`from '${storageURL}'`,
  "from '@/lib/payments'":`from '${paymentURL}'`,
+ "from '@/lib/email'":`from '${emailURL}'`,
  "from 'next/server'":`from '${pathToFileURL(process.cwd()+'/node_modules/next/server.js')}'`,
  "from 'zod'":`from '${import.meta.resolve('zod')}'`,
  "import {cookies} from 'next/headers';":"const cookies=async()=>({get:()=>undefined,set:()=>{},delete:()=>{}});"
@@ -192,4 +201,63 @@ test('a readme may not contain markup, whatever the tag',()=>{
  // contains no markup. Asserted so the boundary is deliberate, not accidental.
  assert.doesNotThrow(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'readme.txt':Buffer.from('see javascript:alert(1) docs')})));
 });
+// --- receipts ---------------------------------------------------------------
+
+/** Capture the SQL and the outgoing mail for one sendReceipt call. */
+async function receiptSend({claimed,mailOk=true}){
+ // A configured sender is the precondition for any receipt at all; the
+ // unconfigured case is asserted separately below.
+ process.env.EMAIL_API_KEY='test-key';process.env.EMAIL_FROM='store@example.com';
+ const calls=[];
+ const rows=[];
+ globalThis.__cursorTest.sql=async(q,p)=>{calls.push({q,p});return rows.shift()??[];};
+ globalThis.__cursorTest.fetch=async(url,init)=>{calls.push({url,body:JSON.parse(init.body)});return {ok:mailOk};};
+ // First statement is the atomic claim; second (if any) is the release.
+ rows.push(claimed?[{email:'buyer@example.com',title:'Neon Nights',slug:'neon-nights',amount:25000,status:'paid',created_at:'2026-09-01T00:00:00Z'}]:[]);
+ const result=await email.sendReceipt('00000000-0000-0000-0000-0000000000aa');
+ return {result,calls};
+}
+test('a receipt is claimed atomically before it is sent',async()=>{
+ const {result,calls}=await receiptSend({claimed:true});
+ assert.equal(result,true,'a claimed, sendable receipt should report success');
+ const claim=calls.find(c=>/SET receipt_sent_at=now\(\)/.test(c.q));
+ assert.ok(claim,'the send must be claimed with a conditional UPDATE');
+ assert.match(claim.q,/status='paid' AND o\.receipt_sent_at IS NULL/,'the claim must require paid AND unsent');
+ const mail=calls.find(c=>c.url&&String(c.url).includes('resend'));
+ assert.ok(mail,'a receipt should actually be sent');
+ assert.equal(mail.body.to,'buyer@example.com');
+ assert.match(mail.body.subject,/receipt/i,'the subject should say what the mail is');
+ // It must not promise a refund: that path is a manual operator decision.
+ assert.ok(!/refund you|money back|automatic refund/i.test(mail.body.text),'must not promise an automatic refund');
+});
+test('a receipt is not sent twice for the same order',async()=>{
+ // Simulates the real duplicate case: two reconciliations for one order. The
+ // second finds receipt_sent_at set, so the claim returns no row and no mail
+ // goes out. Without the claim this would mail the buyer on every webhook retry.
+ const first=await receiptSend({claimed:true});
+ assert.equal(first.result,true);
+ const second=await receiptSend({claimed:false});
+ assert.equal(second.result,false,'second claim must find nothing to send');
+ assert.ok(!second.calls.some(c=>c.url&&String(c.url).includes('resend')),'no second email');
+});
+test('a failed send releases the claim so it can be retried',async()=>{
+ const {result,calls}=await receiptSend({claimed:true,mailOk:false});
+ assert.equal(result,false,'a failed send must report failure');
+ const release=calls.find(c=>/SET receipt_sent_at=NULL/.test(c.q));
+ assert.ok(release,'failure must clear receipt_sent_at, or the buyer never gets a receipt');
+});
+test('no receipt is attempted when mail is not configured',async()=>{
+ // The store can run with no mail provider at all. In that case a paid order
+ // must still reconcile cleanly -- it just must not try to send, and must not
+ // mark the order receipted, or the buyer would never get one after mail is
+ // configured. This is why the guard comes before the claim.
+ const calls=[];
+ globalThis.__cursorTest.sql=async(q,p)=>{calls.push({q,p});return [];};
+ globalThis.__cursorTest.fetch=async()=>{calls.push({url:'network'});return {ok:true};};
+ delete process.env.EMAIL_API_KEY;delete process.env.EMAIL_FROM;
+ const result=await email.sendReceipt('00000000-0000-0000-0000-0000000000ab');
+ assert.equal(result,false);
+ assert.equal(calls.length,0,'no DB work and no network when mail is unconfigured');
+});
+
 test.after(()=>{globalThis.fetch=originalFetch;delete globalThis.__cursorTest;});
