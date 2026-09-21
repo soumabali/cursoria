@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- Self-service account deletion from My Library. Erases email and name,
+  revokes sessions and pending sign-in links, ends download access, and
+  writes an audit row. Orders are retained as financial records with the
+  account replaced by a non-identifying value.
+- `deleted_identities` (sha256 of the deleted address) so a deleted
+  address can never sign in again — without it, sign-in's
+  `ON CONFLICT(email)` upsert recreated the account and silently undid
+  the deletion. Checked in both `auth/request` and `auth/verify`.
+- `.gitignore` (the repo had none) and git remote `soumabali/cursoria`,
+  pushed over SSH. The fine-grained token is read-only for git even
+  though the API reports push permission.
 - Resend outbound email wired up: Worker secrets EMAIL_API_KEY, EMAIL_FROM, SUPERADMIN_EMAIL set.
 - Object storage live: Cloudflare R2 bucket `cursoria-packs` with the
   five S3_* Worker secrets set. Preview and package uploads, published
@@ -10,6 +21,11 @@
   production end to end.
 
 ### Changed
+- Policies page rewritten with a per-data-type retention table, an
+  account-deletion section that matches the implemented behaviour, a
+  refund procedure, and a security section. The operator must still
+  supply the legal business name, a monitored support mailbox
+  (`CONTACT_EMAIL` placeholder), and the governing law.
 - Open-tasks audit recorded; state verified against live prod (0 products, 0 payment_settings, no S3_* secrets).
 
 ### Fixed

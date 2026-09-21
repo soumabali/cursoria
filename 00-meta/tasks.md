@@ -20,18 +20,22 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       end to end.
       Do NOT use the production key until sandbox is verified.
 
-- [ ] **Store policies text** — needs operator decisions. `/policies`
-      is still a draft outline missing: operator identity (legal
-      name/entity), support contact, refund process, data-retention
-      terms. Required before the store can go public.
+- [!] **Policies: operator identity only** — the page itself is written
+      (see Done). What remains is Dhar's to decide and I must not invent:
+      the legal business name/entity, a real monitored support mailbox
+      (the page shows the placeholder `CONTACT_EMAIL`), and the governing
+      law. `/policies` says so explicitly in its last section.
+      Everything else — retention table, deletion, refund procedure,
+      cookies, security — is written and verified against real behaviour.
 
 - [ ] **Real pack content** — the catalog needs actual cursor packs.
       The store is now genuinely empty (0 products); the earlier
       verification pack has been removed.
 
-- [ ] **Git remote + push** — the repo has no remote. GitHub auth is
-      account `soumabali`; the token needs Contents: Read/Write.
-      Local commits: see `git log`.
+- [x] **Git remote + push** — pushed to `soumabali/cursoria` (main).
+      Use SSH, not the token: the fine-grained token has Contents: read
+      but git push returns 403. `~/.ssh/id_ed25519` is already
+      authorised, so `git push origin main` just works.
 
 ## Doable without Dhar
 
@@ -49,6 +53,12 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       header nonce matches the HTML nonce per request. Zero violations.
 - [x] Remove verification test data from production. All R2 objects and
       their DB rows deleted; superadmin account and login kept.
+- [x] Self-service account deletion + retention mechanism. Verified end
+      to end on production (sign in, wrong-email guard, real deletion,
+      DB effect, audit row, and that the deleted address cannot sign in
+      again — see the regression note below).
+- [x] Policies page rewritten: retention table, deletion, refund
+      procedure, cookies, security. Content verified live.
 - [ ] Migrate inline `style=` attributes to CSS classes so `style-src`
       can also drop 'unsafe-inline' (a nonce cannot authorise style
       attributes, only <style> elements)
@@ -79,3 +89,18 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
 - Sign-in links land on `/verify?token=...`, which renders a button
   that must be clicked — it does not auto-submit. `/signin` ignores the
   `token` param entirely.
+- **Sign-in tokens are `randomBytes(32).toString('hex')`, i.e. 64 hex
+  chars, and only their sha256 hex is stored.** Minting a test token as
+  base64url (43 chars) fails the route's `/^[0-9a-f]{64}$/` schema with
+  a generic 400. `lib/security.ts` `token()` is the source of truth.
+- **`email` is unique on `users`, so `ON CONFLICT(email)` drives sign-in.**
+  Anything that changes a user's stored email (deletion anonymises it)
+  moves the row out of the conflict target. That is why
+  `deleted_identities` exists: without a separate record of the deleted
+  address, the next sign-in simply inserts a fresh active row and the
+  deletion is silently undone. Any future "rename email" feature needs
+  the same care.
+- Deleting an account arms this protection by inserting into
+  `deleted_identities`; that address can never sign in again. Deleting a
+  *blocked identity* is therefore not a supported operation — it would
+  legitimately un-delete the account.
