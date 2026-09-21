@@ -9,6 +9,19 @@ export const dynamic='force-dynamic';
 const uuid=z.string().uuid();
 const reply=(data:unknown,status=200)=>NextResponse.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const productSchema=z.object({id:uuid.optional(),title:z.string().trim().min(3).max(100),slug:z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(100),description:z.string().trim().min(30).max(5000),category:z.enum(['Soft & cozy','Cute characters','Pixel art','Nature','Minimal']),mode:z.enum(['free','donation','paid']),price:z.number().int().min(0).max(100000000),compatibility:z.string().min(3).max(120),formats:z.string().min(3).max(60),states:z.number().int().min(1).max(100),version:z.string().min(1).max(30),license:z.string().min(10).max(1500),preview_key:z.string().max(250).nullable(),package_key:z.string().max(250).nullable(),published:z.boolean(),rights:z.literal(true)}).refine(v=>v.mode==='free'?v.price===0:v.price>=1000,'Paid packs and donations require at least Rp1,000.');
+// Opens a Midtrans Snap transaction for an order and stores its redirect URL.
+// Shared by checkout and orders/refresh: an order left pending after a failed
+// Snap call had no checkout_url and no transaction to reconcile, so the
+// customer could neither pay it nor retry it from the UI.
+async function openCheckout(o:Record<string,unknown>):Promise<string>{
+ const host=o.production?'https://app.midtrans.com':'https://app.sandbox.midtrans.com';
+ const snap=await fetch(host+'/snap/v1/transactions',{method:'POST',signal:AbortSignal.timeout(20000),headers:{'Content-Type':'application/json',Authorization:'Basic '+Buffer.from(decrypt(String(o.payment_key))+':').toString('base64')},body:JSON.stringify({transaction_details:{order_id:o.id,gross_amount:o.amount},item_details:[{id:String(o.product_id),price:Number(o.amount),quantity:1,name:String(o.title||'Cursor pack').slice(0,50)}],customer_details:{email:String(o.email)},callbacks:{finish:origin()+'/dashboard?payment=return'},expiry:{unit:'hours',duration:24}})});
+ if(!snap.ok)throw new Error('Checkout could not be opened. Check your order in My Library before trying again.');
+ const result=await snap.json();
+ if(typeof result.redirect_url!=='string'||!result.redirect_url.startsWith(host+'/'))throw new Error('Unexpected payment response.');
+ await sql('UPDATE orders SET checkout_url=$2 WHERE id=$1',[o.id,result.redirect_url]);
+ return result.redirect_url;
+}
 export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>}){
  try{
  const path=(await params).path.join('/');
@@ -80,7 +93,16 @@ export async function POST(req:Request,{params}:{params:Promise<{path:string[]}>
  if(typeof result.redirect_url!=='string'||!result.redirect_url.startsWith(host+'/'))throw new Error('Unexpected payment response.');
  await sql('UPDATE orders SET checkout_url=$2 WHERE id=$1',[o.id,result.redirect_url]);return reply({redirect:result.redirect_url});
  }
- if(path==='orders/refresh'){const d=await body(req),id=uuid.parse(d.id);const [o]=await sql('SELECT id FROM orders WHERE id=$1 AND user_id=$2',[id,u.id]);if(!o)throw new Error('Order not found.');return reply(await reconcile(id));}
+ if(path==='orders/refresh'){
+ const d=await body(req),id=uuid.parse(d.id);
+ const [o]=await sql('SELECT o.*,p.title,u.email FROM orders o JOIN products p ON p.id=o.product_id JOIN users u ON u.id=o.user_id WHERE o.id=$1 AND o.user_id=$2',[id,u.id]);
+ if(!o)throw new Error('Order not found.');
+ // A pending order whose Snap call failed has no checkout_url and no Midtrans
+ // transaction to reconcile, so refresh would only ever fail it. Re-open the
+ // transaction so the customer can actually pay the order they already placed.
+ if(o.status==='pending'&&!o.checkout_url&&o.amount>0&&o.payment_key)return reply({status:'pending',checkout_url:await openCheckout({...o})});
+ return reply(await reconcile(id));
+ }
  if(path==='uploads'){
  await requireUser('creator');if(Number(req.headers.get('content-length')||0)>22*1024*1024)throw new Error('File too large.');const uploadBytes=await readLimited(req,22*1024*1024);const form=await new Response(uploadBytes as unknown as BodyInit,{headers:{'Content-Type':req.headers.get('Content-Type')||''}}).formData(),file=form.get('file'),kind=z.enum(['preview','package']).parse(form.get('kind'));
  if(!(file instanceof File)||file.size>(kind==='preview'?5:20)*1024*1024)throw new Error('Preview limit: 5 MB. ZIP limit: 20 MB.');const bytes=Buffer.from(await file.arrayBuffer());let ext='zip',type='application/zip';

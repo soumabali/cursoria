@@ -16,6 +16,9 @@ const eslintConfig = defineConfig([
     // the app. Moved out of components/ui so the code that ships is not
     // carrying dead files; linted separately from Site code.
     "00-vendor/**",
+    // Scratch probes used while reviewing; not part of the test suite.
+    "_probe_*.mjs",
+    "tests/_probe_*.mjs",
   ]),
   {
     files: ["00-vendor/shadcn-unused/**/*.{ts,tsx}"],

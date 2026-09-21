@@ -8,6 +8,7 @@ const retention:[string,string,string][]=[
 ['Product visit counts','Random first-party identifier, once per product per day','Not linked to your account'],
 ['Payment details (card, bank)','Never stored by this store','Handled entirely by Midtrans'],
 ['A one-way hash of your email','Not stored for active accounts','Kept, to block sign-in with a deleted address'],
+['A deletion marker on the anonymised account row','—','Kept, so an account you closed yourself is distinguishable from one an operator disabled'],
 ];
 return <article className="content-page prose">
 <div className="eyebrow">CLEAR BEFORE YOU CLICK</div>
@@ -22,8 +23,8 @@ return <article className="content-page prose">
 <p>Packs are supplied as downloadable files. Because they are digital goods delivered instantly, you are asked to preview the pack description and contents before buying. Nothing here removes a right you have under Indonesian consumer protection law.</p>
 
 <h2>Refunds and download access</h2>
-<p>To request a refund, email us using the contact address below with the order number and the reason for the request. We aim to answer within 3 working days, and refunds are returned to the original payment method through Midtrans.</p>
-<p>A confirmed full refund removes future download access for that order. Partial refunds pause access while the request is reviewed. This is an interim procedure written by the developer; it is replaced by the operator’s published procedure before real orders are accepted.</p>
+<p>To request a refund, email us using the contact address below with the order number shown in your order history and the reason for the request. We aim to answer within 3 working days, and refunds are returned to the original payment method through Midtrans.</p>
+<p>A confirmed full refund removes future download access for that order. If a partial refund is issued, access to that order is suspended and the request stays open with us until it is settled. Refunds are issued from the Midtrans dashboard; this store does not process refunds automatically. This is an interim procedure written by the developer; it is replaced by the operator’s published procedure before real orders are accepted.</p>
 
 <h2>Account and privacy</h2>
 <p>We store your email, verification status, sessions, orders, and download entitlements so we can operate your account and prove your purchases. Creators can see statistics and transactions for their own work. Superadmins can manage the store.</p>
@@ -37,7 +38,8 @@ return <article className="content-page prose">
 <h3>Deleting your account</h3>
 <p>You can delete your own account from <strong>My Library</strong> at any time. Deletion is immediate and irreversible: your email address and name are erased, every session and pending sign-in link is revoked, and your download access ends. You are signed out straight away.</p>
 <p>The address you deleted with is remembered so that it cannot be used to sign in again, which is what makes the deletion stick. We store only a one-way hash of it for that purpose, not the address itself, so the check cannot be used to recover your email.</p>
-<p>Order records are retained, because a seller must keep records of sales for accounting and tax purposes. They are kept in a form that no longer identifies you: the order keeps its amount, date, and status, but the account it belonged to is replaced with a non-identifying value. If you delete your account you lose access to download links for packs you previously acquired, so download anything you want to keep first.</p>
+<p>Order records are retained, because a seller must keep records of sales for accounting and tax purposes. They are kept in a form that no longer contains your email or name: the order keeps its amount, date, and status, but the account it belonged to is replaced with a non-identifying value. If you delete your account you lose access to download links for packs you previously acquired, so download anything you want to keep first.</p>
+<p>Deletion is permanent and it is not a refund. Because the address can never sign in again, a deleted account cannot be restored, re-issued, or used to re-obtain an earlier purchase. If you are unsure, download your packs and ask us a question before deleting.</p>
 
 <h3>Cookies and visit counts</h3>
 <p>Signing in sets one first-party session cookie. Product pages use a random first-party identifier so we can count how often a pack is viewed; it is counted once per product per day and is not linked to your account. We do not use advertising or third-party tracking cookies.</p>
