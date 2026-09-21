@@ -4,6 +4,10 @@
 
 ### Added
 - Resend outbound email wired up: Worker secrets EMAIL_API_KEY, EMAIL_FROM, SUPERADMIN_EMAIL set.
+- Object storage live: Cloudflare R2 bucket `cursoria-packs` with the
+  five S3_* Worker secrets set. Preview and package uploads, published
+  previews, and entitlement-gated ZIP downloads all verified against
+  production end to end.
 
 ### Changed
 - Open-tasks audit recorded; state verified against live prod (0 products, 0 payment_settings, no S3_* secrets).
