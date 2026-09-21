@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {transpileModule,ModuleKind,ScriptTarget} from 'typescript';
 import {createHash} from 'node:crypto';
+import {deflateRawSync} from 'node:zlib';
 import {pathToFileURL} from 'node:url';
 
 // Execute the actual server modules with only service boundaries replaced.
@@ -62,4 +63,61 @@ test('settlement invokes one atomic locked entitlement statement',async()=>{cons
 test('refund is passed to atomic reconciliation as revoked state',async()=>{const q=paymentFixture('refund');await payments.reconcile(orderId);assert.equal(q[1].p[1],'refunded');assert.match(q[1].q,/SET active=false/);});
 test('invalid ZIP and executable-only ZIP are rejected',()=>{assert.throws(()=>storage.validateZip(Buffer.from('bad')));const name=Buffer.from('malware.exe'),b=Buffer.alloc(30+name.length+46+name.length+22);b.writeUInt32LE(0x04034b50);let pos=30+name.length;b.writeUInt32LE(0x02014b50,pos);b.writeUInt16LE(name.length,pos+28);name.copy(b,pos+46);const end=b.length-22;b.writeUInt32LE(0x06054b50,end);b.writeUInt16LE(1,end+10);b.writeUInt32LE(pos,end+16);assert.throws(()=>storage.validateZip(b),/only CUR/);});
 test('disconnected preview cannot accept real settings or orders',async()=>{delete process.env.DATABASE_URL;const r=await post('checkout',{});assert.equal(r.status,503);process.env.DATABASE_URL='postgresql://test@example.neon.tech/test';});
+
+// Real archives, built here so the validator is exercised on genuine deflate
+// streams rather than hand-rolled bytes. The name checks alone cannot see
+// inside a compressed member, which is why these cases exist.
+function zip(entries){
+ const chunks=[],central=[];let offset=0;
+ for(const [name,content] of Object.entries(entries)){
+  const data=Buffer.from(content),nameBuf=Buffer.from(name);
+  const deflated=deflateRawSync(data);
+  const local=Buffer.alloc(30+nameBuf.length);
+  local.writeUInt32LE(0x04034b50,0);local.writeUInt16LE(20,4);local.writeUInt16LE(0,6);
+  local.writeUInt16LE(8,8);local.writeUInt32LE(deflated.length,18);local.writeUInt32LE(data.length,22);
+  local.writeUInt16LE(nameBuf.length,26);nameBuf.copy(local,30);
+  chunks.push(local,deflated);
+  const cd=Buffer.alloc(46+nameBuf.length);
+  cd.writeUInt32LE(0x02014b50,0);cd.writeUInt16LE(20,4);cd.writeUInt16LE(20,6);cd.writeUInt16LE(0,8);
+  cd.writeUInt16LE(8,10);cd.writeUInt32LE(deflated.length,20);cd.writeUInt32LE(data.length,24);
+  cd.writeUInt16LE(nameBuf.length,28);cd.writeUInt32LE(offset,42);nameBuf.copy(cd,46);
+  central.push(cd);
+  offset+=local.length+deflated.length;
+ }
+ const cdBuf=Buffer.concat(central),body=Buffer.concat(chunks);
+ const eocd=Buffer.alloc(22);
+ eocd.writeUInt32LE(0x06054b50,0);eocd.writeUInt16LE(Object.keys(entries).length,8);
+ eocd.writeUInt16LE(Object.keys(entries).length,10);eocd.writeUInt32LE(cdBuf.length,12);
+ eocd.writeUInt32LE(body.length,16);
+ return Buffer.concat([body,cdBuf,eocd]);
+}
+const VALID_CUR=Buffer.concat([Buffer.from([0,0,2,0,32,32,0,0,1,0,32,0,40,0,0,0,22,0,0,0]),Buffer.alloc(40)]);
+const VALID_PNG=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.alloc(40)]);
+const VALID_ANI=Buffer.concat([Buffer.from('RIFF'),Buffer.from([4,0,0,0]),Buffer.from('ACON')]);
+
+test('a genuine cursor pack passes validation',()=>{
+ assert.doesNotThrow(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'readme.txt':Buffer.from('Thanks for the pack!\n')})));
+ assert.doesNotThrow(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'preview.png':VALID_PNG})));
+ assert.doesNotThrow(()=>storage.validateZip(zip({'anim.ani':VALID_ANI,'cursor.cur':VALID_CUR})));
+ assert.doesNotThrow(()=>storage.validateZip(zip({'cursors/a/b/cursor.cur':VALID_CUR})),'nested folders are legitimate');
+});
+test('markup smuggled into an allowed extension is rejected',()=>{
+ assert.throws(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'preview.png':Buffer.from('<html><script>alert(1)</script></html>')})),/not actually an image/);
+ assert.throws(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'preview.png':Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")})),/not actually an image/);
+ assert.throws(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'readme.txt':Buffer.from('<script>alert(1)</script>')})),/markup or script/);
+ assert.throws(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'readme.txt':Buffer.from('<html><body>hi</body></html>')})),/markup or script/);
+});
+test('content must match the extension it claims',()=>{
+ assert.throws(()=>storage.validateZip(zip({'cursor.cur':Buffer.from('NOTACURSOR'+'x'.repeat(40))})),/not a valid cursor/);
+ assert.throws(()=>storage.validateZip(zip({'anim.ani':Buffer.from('RIFFxxxxNOPE'+'x'.repeat(20))})),/not a valid animated cursor/);
+ assert.throws(()=>storage.validateZip(zip({'cursor.cur':VALID_CUR,'readme.txt':Buffer.from('ok\x00\x01binary')})),/binary data/);
+});
+test('path traversal is rejected however it is spelled',()=>{
+ assert.throws(()=>storage.validateZip(zip({'../../etc/passwd':Buffer.from('x'),'cursor.cur':VALID_CUR})),/Unsafe ZIP entry/);
+ assert.throws(()=>storage.validateZip(zip({'/etc/shadow':Buffer.from('x'),'cursor.cur':VALID_CUR})),/Unsafe ZIP entry/);
+ assert.throws(()=>storage.validateZip(zip({'..\\..\\win.ini':Buffer.from('x'),'cursor.cur':VALID_CUR})),/Unsafe ZIP entry/);
+});
+test('a pack with no cursor files is rejected',()=>{
+ assert.throws(()=>storage.validateZip(zip({'readme.txt':Buffer.from('nothing here')})),/needs cursor files/);
+});
 test.after(()=>{globalThis.fetch=originalFetch;delete globalThis.__cursorTest;});
