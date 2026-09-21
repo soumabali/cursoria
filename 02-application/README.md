@@ -34,6 +34,29 @@ The private Sites URL is a design/application preview. Its owner-only access gat
 
 Use an internet-accessible HTTPS deployment for sandbox notifications. In Midtrans configure `<APP_URL>/api/payments/webhook`. Do not point Midtrans at localhost or the owner-private Sites preview. Use the production environment and key only after sandbox verification and completing the store policies. Current public policy content is a draft operational outline requiring your support contact, operator identity, refund process, and retention terms.
 
+## Deploying the Worker
+
+There is no `wrangler.toml` in this repository. `npm run build` emits one
+at `dist/server/wrangler.json` (worker name `cursor-studio`). Deploy with:
+
+```bash
+npx wrangler deploy --name cursoria --config dist/server/wrangler.json
+```
+
+`--name cursoria` targets the existing Worker. Do not pass `--assets` on
+the command line: it resolves against the current working directory and
+expects `./client`, which does not exist. The generated config already
+points at `dist/client`.
+
+## SQL compatibility with the Neon HTTPS endpoint
+
+Application SQL runs through Neon's HTTPS SQL endpoint
+(`https://<host>/sql`), which is stricter than psql. A bare computed
+column alias that collides with a reserved word is rejected with
+PostgreSQL 42601, even though the same statement works in psql. Always
+write an explicit `AS <name>` and avoid bare reserved words (`day`,
+`user`, `order`, `end`, ...) as aliases.
+
 ## Hosting
 
 Native deployment uses standard Next.js (`build:next` / `start:next`). The supplied Dockerfile runs the native Next.js build. It needs the same runtime environment variables and external services. The Sites scripts are retained for the separate Vinext/Cloudflare preview; `npm run build` builds that runtime. The two builds share application source. No public audience change was made.
