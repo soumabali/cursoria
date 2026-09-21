@@ -3,17 +3,15 @@
 ## [Unreleased]
 
 ### Added
-- Self-service account deletion from My Library. Erases email and name,
-  revokes sessions and pending sign-in links, ends download access, and
-  writes an audit row. Orders are retained as financial records with the
-  account replaced by a non-identifying value.
-- `deleted_identities` (sha256 of the deleted address) so a deleted
-  address can never sign in again — without it, sign-in's
-  `ON CONFLICT(email)` upsert recreated the account and silently undid
-  the deletion. Checked in both `auth/request` and `auth/verify`.
+- Account deletion from My Library, with a `deleted_identities` table
+  (sha256 of the deleted address) so a deleted account cannot be
+  recreated by signing in again.
 - `.gitignore` (the repo had none) and git remote `soumabali/cursoria`,
   pushed over SSH. The fine-grained token is read-only for git even
   though the API reports push permission.
+- ZIP content inspection on upload: members are decompressed and their
+  real type is read from the leading bytes, so HTML inside a `.png` or
+  script inside a `readme.txt` is refused. Security tests 12 → 17.
 - Resend outbound email wired up: Worker secrets EMAIL_API_KEY, EMAIL_FROM, SUPERADMIN_EMAIL set.
 - Object storage live: Cloudflare R2 bucket `cursoria-packs` with the
   five S3_* Worker secrets set. Preview and package uploads, published
@@ -29,6 +27,14 @@
 - Open-tasks audit recorded; state verified against live prod (0 products, 0 payment_settings, no S3_* secrets).
 
 ### Fixed
+- `style-src` no longer allows 'unsafe-inline'. Inline style ATTRIBUTES
+  are blocked by `style-src-attr`, so every element-level `style=` was
+  migrated to classes in globals.css; the revenue chart's data-driven bar
+  height now picks a generated `bar-N` class. The previous code comment
+  claiming inline attributes were unaffected was wrong.
+- The local header's name/extra lengths were read at the central
+  directory's offsets, so the payload offset landed mid-stream and ZIP
+  inflate failed on every valid entry.
 - Nonce-based CSP: `script-src` no longer allows 'unsafe-inline'. A
   per-request nonce is set on the incoming request's CSP; vinext reads
   it from the request headers and stamps it on its tags. Verified: header

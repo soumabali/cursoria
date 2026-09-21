@@ -59,12 +59,20 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       again — see the regression note below).
 - [x] Policies page rewritten: retention table, deletion, refund
       procedure, cookies, security. Content verified live.
-- [ ] Migrate inline `style=` attributes to CSS classes so `style-src`
-      can also drop 'unsafe-inline' (a nonce cannot authorise style
-      attributes, only <style> elements)
-- [ ] Independent security review
-- [ ] Malware scanning for uploaded ZIPs before a larger public launch
-      (current check is file-type/path/size only, not antivirus)
+- [x] Migrate inline `style=` attributes to CSS classes so `style-src`
+      can also drop 'unsafe-inline'. Done — and the reason it was needed
+      is sharper than assumed: `style-src` without 'unsafe-inline' blocks
+      style ATTRIBUTES (`style-src-attr`). No nonce can ever authorise a
+      style attribute, so the only fix is to move the style into the
+      stylesheet. Verified live: 0 violations across 11 routes.
+- [x] Malware/content scanning for uploaded ZIPs. The validator now
+      decompresses members and checks real content against the claimed
+      extension (image magic bytes, text without markup/script, cursor
+      magic). Not antivirus — a determined attacker can still ship a
+      malicious .cur, and that is stated in the code. 5 permanent tests.
+- [~] Independent security review + policy-accuracy review. Delegated to
+      two fresh-context reviewers (read-only, no production writes).
+      Findings to be triaged into this board on return.
 
 ## Notes
 
