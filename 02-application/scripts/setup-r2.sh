@@ -35,6 +35,11 @@ echo "Endpoint: $endpoint"
 
 # 1. Ensure the bucket exists. Needs an R2-edit API token; the S3 keys
 #    below cannot create buckets.
+# A token scoped only to a bucket's objects (the usual R2 API token
+# created alongside the S3 keys) cannot list or create buckets. That is
+# not an error here: the bucket already exists or the operator created
+# it in the dashboard. Warn and continue rather than aborting, so the
+# secrets still get pushed.
 if [[ -n "${R2_API_TOKEN:-}" ]]; then
   echo "==> Checking bucket via API"
   existing="$(curl -sS -m 25 \
@@ -42,7 +47,7 @@ if [[ -n "${R2_API_TOKEN:-}" ]]; then
     -H "Authorization: Bearer $R2_API_TOKEN" -H 'Content-Type: application/json')"
   if printf '%s' "$existing" | grep -q "\"name\":\"$bucket\""; then
     echo "    bucket already exists"
-  else
+  elif printf '%s' "$existing" | grep -q '"success":true'; then
     created="$(curl -sS -m 25 -X POST \
       "https://api.cloudflare.com/client/v4/accounts/$account_id/r2/buckets" \
       -H "Authorization: Bearer $R2_API_TOKEN" -H 'Content-Type: application/json' \
@@ -55,6 +60,9 @@ if [[ -n "${R2_API_TOKEN:-}" ]]; then
       echo >&2
       exit 1
     fi
+  else
+    echo "    token cannot list buckets (S3-scoped only); assuming"
+    echo "    '$bucket' already exists. Verify in the R2 dashboard."
   fi
 else
   echo "==> Skipping bucket check (R2_API_TOKEN not set)"
