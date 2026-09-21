@@ -53,8 +53,8 @@ return <article className="content-page prose">
 <p>Passwords are not used: sign-in uses a single-use emailed link. Traffic is served over HTTPS with a strict content security policy. If you believe you have found a security problem, please report it to the contact address rather than testing it against other people’s accounts.</p>
 
 <h2>Contact</h2>
-<p>Questions about an order, a refund, or your data: <strong>CONTACT_EMAIL</strong>.</p>
+<p>Questions about an order, a refund, or your data: <strong>info@nexigo.my.id</strong>.</p>
 
 <h2>Operator details before launch</h2>
-<p>The operator must replace the contact address above with a monitored mailbox, and publish the legal business name and address and the governing law that applies, before the store accepts real orders. The refund procedure and the retention periods in the table are the developer’s defaults and must be confirmed or corrected by the operator. Sample products are demonstrations and cannot be purchased.</p>
+<p>The contact address above is a real monitored mailbox. Still to be published by the operator before the store accepts real orders: the legal business name and address, and the governing law that applies. The refund procedure and the retention periods in the table are the developer’s defaults and must be confirmed or corrected by the operator. Sample products are demonstrations and cannot be purchased.</p>
 </article>}

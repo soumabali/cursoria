@@ -42,6 +42,12 @@
   lists the acceptance record.
 - Migration `database/004_terms_and_receipts.sql`.
 
+- Contact address published: `info@nexigo.my.id` replaces the literal
+  `CONTACT_EMAIL` placeholder on `/policies`. The operator notice was corrected
+  to match — it previously told the reader to replace an address that had
+  already been replaced, and now states only the identity that is genuinely
+  still pending (legal name, address, governing law).
+
 ### Fixed
 - **ZIP bomb: a 0.25 MB upload hung the Worker past 60 s and left the site
   intermittently unresponsive.** Declared-size limits were satisfied by the
