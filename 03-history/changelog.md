@@ -27,6 +27,24 @@
 - Open-tasks audit recorded; state verified against live prod (0 products, 0 payment_settings, no S3_* secrets).
 
 ### Fixed
+- **ZIP bomb: a 0.25 MB upload hung the Worker past 60 s and left the site
+  intermittently unresponsive.** Declared-size limits were satisfied by the
+  archive lying about its own contents. The member's declared size is now
+  checked before decompressing, so the allocation is bounded by the cap
+  rather than by the archive. Refused in 0.12–0.25 s.
+- `.txt` markup check was a tag blocklist; it is now an allowlist (any `<`
+  is refused).
+- `objectRequest` had no key guard: `..` collapses under URL normalisation
+  and drops the bucket prefix, so the per-user prefix was not a boundary.
+- No per-IP limit on `auth/request` (mail-bomb plus shared-bucket DoS), and
+  a deleted address was distinguishable from any other. Both fixed; the
+  refusal now answers identically to a normal request.
+- `views` was unlimited and trusted a shape-checked cookie, so view counts
+  were inflatable. Now rate-limited per IP.
+- The inline Snap call in `checkout` had drifted from `openCheckout` (no
+  timeout, different item details); both share one function now.
+- Every outbound fetch now has a timeout. None did, so a hung dependency
+  produced a raw 5xx instead of the considered error each path already had.
 - `style-src` no longer allows 'unsafe-inline'. Inline style ATTRIBUTES
   are blocked by `style-src-attr`, so every element-level `style=` was
   migrated to classes in globals.css; the revenue chart's data-driven bar

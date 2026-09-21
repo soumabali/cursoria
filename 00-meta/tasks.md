@@ -70,9 +70,20 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       extension (image magic bytes, text without markup/script, cursor
       magic). Not antivirus — a determined attacker can still ship a
       malicious .cur, and that is stated in the code. 5 permanent tests.
-- [~] Independent security review + policy-accuracy review. Delegated to
-      two fresh-context reviewers (read-only, no production writes).
-      Findings to be triaged into this board on return.
+- [x] Independent security review + policy-accuracy review. Two
+      fresh-context reviewers, read-only, no production writes. Both
+      delivered; findings triaged and fixed. Reports:
+      `02-application/docs/security-review-independent.md` and
+      `.../policy-accuracy-and-launch-readiness-review.md`.
+- [x] ZIP bomb (found BY the review, and it was live: a 0.25 MB upload
+      hung the Worker past 60 s and degraded the site). Fixed and verified
+      in production. Note for anyone touching this: the bound must not
+      rely on `maxOutputLength`, because the Workers `node:zlib` shim
+      ignores it while Node honours it — the local suite passed 20/20
+      while production was vulnerable.
+- [ ] A security bound verified only in the Node test runner is not
+      verified. Anything depending on a platform API needs testing
+      against the deployed runtime too.
 
 ## Notes
 
