@@ -34,6 +34,15 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
 - [ ] **Real pack content** — the catalog needs actual cursor packs.
       The store is now genuinely empty (0 products); the earlier
       verification pack has been removed.
+      Searched the server and the vault for existing .cur/.ani assets:
+      none. The only ANI on this machine is scipy's test fixture
+      (`Transparent Busy.ani`), which is not ours to sell.
+      NOT doable without Dhar: authoring real packs and deciding their
+      licence/rights is a product decision. Placeholder packs were
+      considered and rejected — an empty honest catalog beats one padded
+      with invented products claiming invented rights, and the purchase
+      and download path is already proven end to end against a real pack
+      during verification, so nothing is left untested by waiting.
 
 - [x] **Git remote + push** — pushed to `soumabali/cursoria` (main).
       Use SSH, not the token: the fine-grained token has Contents: read
