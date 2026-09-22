@@ -22,9 +22,12 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
 
 - [!] **Policies: operator identity only** — the page itself is written
       (see Done). What remains is Dhar's to decide and I must not invent:
-      the legal business name/entity, a real monitored support mailbox
-      (the page shows the placeholder `CONTACT_EMAIL`), and the governing
-      law. `/policies` says so explicitly in its last section.
+      the legal business name/entity and the governing law. `/policies`
+      says so explicitly in its last section.
+      DONE and live: the support mailbox is `info@nexigo.my.id`, replacing
+      the literal `CONTACT_EMAIL` placeholder that used to render to
+      customers. The operator notice was corrected too — it had told the
+      reader to replace an address that was already replaced.
       Everything else — retention table, deletion, refund procedure,
       cookies, security — is written and verified against real behaviour.
 
@@ -39,6 +42,11 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
 
 ## Doable without Dhar
 
+- [x] Deploy verification: every commit was shipped as it landed, and the
+      live Worker was confirmed to be the HEAD build (`dbcd0657` from
+      `6531664`) rather than assumed. All public routes 200; the new
+      policies content and the sign-in checkbox confirmed present in the
+      running bundle.
 - [x] Deploy the lint-cleanup build to the Worker
 - [x] Fix admin overview 500 (reserved SQL alias `day`)
 - [x] Browser/E2E pass: public routes, magic-link sign-in, admin,
@@ -95,9 +103,11 @@ Legend: `[ ]` open · `[~]` in progress · `[x]` done · `[!]` waiting on Dhar
       acceptance (COALESCE, so later sign-ins cannot rewrite it), and
       `orders.policies_accepted_at` records it per purchase. Verified
       live: accepted=true records, accepted=false does NOT.
-- [ ] A security bound verified only in the Node test runner is not
-      verified. Anything depending on a platform API needs testing
-      against the deployed runtime too.
+- [x] Runtime-verification rule written up as a skill. A security bound
+      proven only in the Node test runner is not proven: anything relying
+      on a platform API must be exercised against the deployed runtime,
+      because the Workers `node:zlib` shim ignored `maxOutputLength` while
+      Node honoured it, so the local suite passed while production hung.
 
 ## Notes
 
